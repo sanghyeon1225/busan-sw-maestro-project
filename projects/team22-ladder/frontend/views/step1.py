@@ -23,7 +23,8 @@ def translate_to_english(name: str) -> str:
                     "Use internationally recognizable English terms that are commonly photographed. "
                     "For Korean-specific ingredients, use a descriptive Western equivalent. "
                     "Examples: 돼지고기 → raw pork slices, 두부 → fresh tofu block, 달걀 → fresh eggs, "
-                    "김치 → fermented cabbage, 대파 → green onion, 된장 → soybean paste, 고추장 → red chili paste. "
+                    "김치 → kimchi, 대파 → green onion, 된장 → soybean paste, 고추장 → red chili paste. "
+                    "For globally known Korean foods (kimchi, bibimbap, tteok, etc.), use the romanized Korean name as-is. "
                     "Reply with only the search phrase, nothing else."
                 )},
                 {"role": "user", "content": name},
@@ -43,8 +44,8 @@ INGREDIENT_EMOJI = {
 
 STATUS_CONFIG = {
     "normal":   {"label": "",             "border": "#e2e8f0"},
-    "required": {"label": "필수",         "border": "#ef4444"},
-    "expiring": {"label": "유통기한임박", "border": "#f97316"},
+    "required": {"label": "필수",         "border": "#3b82f6"},
+    "expiring": {"label": "유통기한임박", "border": "#60a5fa"},
 }
 
 
@@ -57,13 +58,19 @@ def fetch_unsplash_image(query: str) -> str | None:
     key = os.getenv("UNSPLASH_ACCESS_KEY", "")
     if not key:
         return None
-    search_query = translate_to_english(query)
+    search_query = translate_to_english(query) + " food ingredient"
     try:
         res = requests.get(
             "https://api.unsplash.com/search/photos",
-            params={"query": search_query, "per_page": 1, "orientation": "squarish"},
+            params={
+                "query": search_query,
+                "per_page": 5,
+                "orientation": "squarish",
+                "order_by": "relevant",
+                "content_filter": "high",
+            },
             headers={"Authorization": f"Client-ID {key}"},
-            timeout=3,
+            timeout=5,
         )
         data = res.json()
         results = data.get("results", [])
@@ -75,9 +82,13 @@ def fetch_unsplash_image(query: str) -> str | None:
 
 
 def render():
-    st.title("재료 입력")
-    st.caption("냉장고 속 재료를 추가하고, 필수 재료와 유통기한 임박 재료를 표시해보세요.")
-    st.markdown("---")
+    st.title("📦 재료 입력")
+    st.markdown(
+        "<p style='color:#6b7280;font-size:1.05rem;margin-top:-8px'>"
+        "냉장고 속 재료를 추가하고, 필수·유통기한 임박 재료를 표시해보세요.</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr style='margin:12px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
     tab_image, tab_text = st.tabs(["사진 업로드", "직접 입력"])
 
@@ -130,9 +141,9 @@ def render():
 
     summary = f"재료 목록 &nbsp; <span style='font-size:0.85em;color:#6b7280'>총 {total}개</span>"
     if req:
-        summary += f" &nbsp; <span style='color:#ef4444;font-size:0.85em'>필수 {req}개</span>"
+        summary += f" &nbsp; <span style='color:#3b82f6;font-size:0.85em'>필수 {req}개</span>"
     if exp:
-        summary += f" &nbsp; <span style='color:#f97316;font-size:0.85em'>유통기한임박 {exp}개</span>"
+        summary += f" &nbsp; <span style='color:#60a5fa;font-size:0.85em'>유통기한임박 {exp}개</span>"
     st.markdown(f"### {summary}", unsafe_allow_html=True)
 
     _render_ingredient_grid()
@@ -178,7 +189,7 @@ def _render_ingredient_grid():
                         )
 
                     st.markdown(
-                        f"<div style='text-align:center;font-weight:600;font-size:0.9em;margin-bottom:6px'>{item['name']}</div>",
+                        f"<div style='text-align:center;font-weight:700;font-size:1.05rem;margin-bottom:8px'>{item['name']}</div>",
                         unsafe_allow_html=True,
                     )
 

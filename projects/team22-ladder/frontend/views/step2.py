@@ -5,9 +5,13 @@ TOOL_OPTIONS = ["전자레인지", "가스레인지", "에어프라이어", "오
 
 
 def render():
-    st.title("재료 보강")
-    st.markdown("기본 소스와 조리도구, 추가 재료를 선택해주세요.")
-    st.markdown("---")
+    st.title("🧂 재료 보강")
+    st.markdown(
+        "<p style='color:#6b7280;font-size:1.05rem;margin-top:-8px'>"
+        "기본 소스와 조리도구, 추가 재료를 선택해주세요.</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr style='margin:12px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
     # 소스
     st.markdown("### 보유 소스")

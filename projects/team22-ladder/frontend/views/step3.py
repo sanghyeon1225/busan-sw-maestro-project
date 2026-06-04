@@ -4,8 +4,8 @@ DIFFICULTY_LABEL = {1: "매우 쉬움", 2: "쉬움", 3: "보통", 4: "어려움"
 
 
 def render():
-    st.title("레시피 추천")
-    st.markdown("---")
+    st.title("🍳 레시피 추천")
+    st.markdown("<hr style='margin:4px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
     recipes = st.session_state.get("recipes", {})
 
@@ -64,7 +64,7 @@ def _render_recipe_cards(recipe_list: list, owned: set):
                 if missing:
                     st.markdown(
                         " ".join(
-                            f'<span style="background:#fee2e2;padding:2px 6px;border-radius:4px;font-size:0.85em">{r}</span>'
+                            f'<span style="background:#dbeafe;padding:2px 6px;border-radius:4px;font-size:0.85em;color:#1d4ed8">{r}</span>'
                             for r in missing
                         ),
                         unsafe_allow_html=True,
