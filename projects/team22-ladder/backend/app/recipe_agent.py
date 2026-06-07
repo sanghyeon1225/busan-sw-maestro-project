@@ -106,11 +106,57 @@ COMMON_RECIPE_NAMES = {
 }
 
 
+def _enforce_top_recipes_coverage(
+    top: list[dict],
+    pool: list[dict],
+    required: list[str],
+    expiring: list[str],
+) -> list[dict]:
+    """top_recipes 리스트에서 required/expiring 재료 커버리지를 강제한다."""
+    if not required and not expiring:
+        return top
+
+    def recipe_uses(recipe: dict, ingredient: str) -> bool:
+        return any(ingredient in ing or ing in ingredient for ing in recipe.get("ingredients", []))
+
+    priority_list = [(ing, True) for ing in required] + [(ing, False) for ing in expiring]
+    result = list(top)
+
+    for ingredient, _ in priority_list:
+        if any(recipe_uses(r, ingredient) for r in result):
+            continue
+        covering = [r for r in pool if recipe_uses(r, ingredient)]
+        if not covering:
+            continue
+        best = min(covering, key=lambda r: len(r.get("missing_ingredients", [])))
+        if any(r["name"] == best["name"] for r in result):
+            continue
+        if len(result) < TOP_RECIPES_LIMIT:
+            result.append(best)
+        else:
+            for i in range(len(result) - 1, -1, -1):
+                if not any(recipe_uses(result[i], ing) for ing, _ in priority_list):
+                    result[i] = best
+                    break
+    return result
+
+
 def generate_recipes(payload: dict[str, Any]) -> dict[str, Any]:
     graph = _build_graph()
     result = graph.invoke({"raw_input": payload, "logs": []})
-    top_recipes = result.get("top_recipes", [])[:TOP_RECIPES_LIMIT]
+    top_recipes_raw = result.get("top_recipes", [])
+    top_recipes = top_recipes_raw[:TOP_RECIPES_LIMIT]
     recipes = result.get("final_recipes", {})
+
+    normalized = result.get("normalized_input", {})
+    required = normalized.get("required_ingredients", [])
+    expiring = normalized.get("expiring_ingredients", [])
+    if required or expiring:
+        pool = list(top_recipes_raw)
+        for cat_recipes in result.get("validated_recipes", {}).values():
+            pool.extend(cat_recipes)
+        top_recipes = _enforce_top_recipes_coverage(top_recipes, pool, required, expiring)
+
     envelope = {
         "top_recipes": top_recipes,
         "recipes": recipes,
@@ -157,12 +203,17 @@ def _iter_all_recipe_entries(envelope: dict[str, Any]):
         if isinstance(recipe, dict):
             yield recipe
     recipes = envelope.get("recipes", {})
-    if not isinstance(recipes, dict):
-        return
-    for items in recipes.values():
-        for recipe in items or []:
-            if isinstance(recipe, dict):
-                yield recipe
+    if isinstance(recipes, dict):
+        for items in recipes.values():
+            for recipe in items or []:
+                if isinstance(recipe, dict):
+                    yield recipe
+    candidate_recipes = envelope.get("candidate_recipes", {})
+    if isinstance(candidate_recipes, dict):
+        for items in candidate_recipes.values():
+            for recipe in items or []:
+                if isinstance(recipe, dict):
+                    yield recipe
 
 
 def _fetch_youtube_video(api_key: str, query: str) -> dict[str, str] | None:
@@ -477,6 +528,60 @@ def _llm_validate_recipes(state: RecipeState) -> RecipeState:
     return _append_log({**state, "validated_recipes": validated}, "LLM 검증 완료")
 
 
+def _enforce_ingredient_coverage(
+    final: dict[str, list[dict]],
+    candidates: dict[str, list[dict]],
+    required: list[str],
+    expiring: list[str],
+) -> dict[str, list[dict]]:
+    """required/expiring 재료를 하나 이상 포함하는 레시피가 최종 결과에 있도록 강제한다."""
+    if not required and not expiring:
+        return final
+
+    def recipe_uses(recipe: dict, ingredient: str) -> bool:
+        return any(ingredient in ing or ing in ingredient for ing in recipe.get("ingredients", []))
+
+    def is_covered(ingredient: str) -> bool:
+        return any(recipe_uses(r, ingredient) for rs in final.values() for r in rs)
+
+    all_candidates = [
+        {"category": cat, **recipe}
+        for cat, recipes in candidates.items()
+        for recipe in recipes
+    ]
+
+    priority_list = [(ing, True) for ing in required] + [(ing, False) for ing in expiring]
+
+    for ingredient, _ in priority_list:
+        if is_covered(ingredient):
+            continue
+
+        covering = [r for r in all_candidates if recipe_uses(r, ingredient)]
+        if not covering:
+            continue
+
+        best = min(covering, key=lambda r: len(r.get("missing_ingredients", [])))
+        cat = best["category"]
+        entry = {k: v for k, v in best.items() if k != "category"}
+
+        if cat not in final:
+            final[cat] = []
+
+        if any(r["name"] == entry["name"] for r in final[cat]):
+            continue
+
+        if len(final[cat]) < RECIPES_PER_CATEGORY:
+            final[cat].append(entry)
+        else:
+            for i in range(len(final[cat]) - 1, -1, -1):
+                r = final[cat][i]
+                if not any(recipe_uses(r, ing) for ing, _ in priority_list):
+                    final[cat][i] = entry
+                    break
+
+    return final
+
+
 def _llm_select_final_recipes(state: RecipeState) -> RecipeState:
     """Agent 4: 검증된 후보 중 사용자 재료 활용도·다양성 기준으로 최종 레시피를 선정한다."""
     api_key = os.getenv("UPSTAGE_API_KEY", "").strip()
@@ -551,6 +656,8 @@ def _llm_select_final_recipes(state: RecipeState) -> RecipeState:
         selected_set = {r["name"] for r in ordered}
         fallback = [r for r in items if r["name"] not in selected_set]
         final[category] = (ordered + fallback)[:RECIPES_PER_CATEGORY]
+
+    final = _enforce_ingredient_coverage(final, candidates, required, expiring)
 
     has_recipes = any(final.get(cat) for cat in final)
     new_retry_count = retry_count + 1 if not has_recipes else retry_count
@@ -714,14 +821,32 @@ def _system_prompt(normalized_input: dict[str, list[str]], selected_categories: 
         for key in selected_categories
     )
     output_keys = ",\n".join(f'  "{key}": []' for key in selected_categories)
+
+    required = normalized_input.get("required_ingredients", [])
+    expiring = normalized_input.get("expiring_ingredients", [])
+    mandatory_lines = []
+    if required:
+        mandatory_lines.append(
+            f"[절대 규칙] required_ingredients = {json.dumps(required, ensure_ascii=False)}\n"
+            f"위 재료 각각을 ingredients에 포함하는 레시피를 top_recipes 또는 카테고리 레시피에 반드시 하나 이상 생성한다. "
+            f"이 규칙은 다른 모든 규칙보다 우선한다."
+        )
+    if expiring:
+        mandatory_lines.append(
+            f"[우선 규칙] expiring_ingredients = {json.dumps(expiring, ensure_ascii=False)}\n"
+            f"위 재료를 사용하는 전형적인 레시피가 있으면 반드시 포함한다."
+        )
+    mandatory_section = ("\n\n" + "\n\n".join(mandatory_lines)) if mandatory_lines else ""
+
     return f"""
 너는 냉장고 재료 기반 레시피 생성 Agent다.
 사용자가 가진 재료를 참고하되, 재료를 조합해서 새 메뉴를 만들지 말고 실제로 널리 먹는 전형적인 가정식/기본 조리법 중심 레시피를 추천한다.
 트렌디한 퓨전, 과장된 메뉴명, 검증하기 어려운 조합, 실제로 흔하지 않은 재료 조합은 피한다.
+{mandatory_section}
 
 규칙:
-- required_ingredients는 가능한 한 반드시 사용하는 레시피를 우선 추천한다.
-- expiring_ingredients는 자연스럽게 어울리는 전형적인 요리가 있을 때 우선 반영한다.
+- required_ingredients가 있으면 각 재료를 포함하는 레시피를 반드시 하나 이상 생성한다.
+- expiring_ingredients는 자연스럽게 어울리는 전형적인 요리가 있을 때 반드시 우선 포함한다.
 - 일반 보유 재료는 전형적인 레시피에 자연스럽게 맞을 때만 사용하고, 억지로 모두 넣지 않는다.
 - 레시피 이름은 실제 요리책, 포털 검색, 유튜브에서 흔히 찾을 수 있는 표준 메뉴명처럼 작성한다.
 - "김치두부밥", "계란두부김치찜", "계란두부김치전"처럼 보유 재료명을 이어 붙여 만든 메뉴명은 금지한다.
