@@ -110,6 +110,7 @@ def generate_recipes(payload: dict[str, Any]) -> dict[str, Any]:
     envelope = {
         "top_recipes": top_recipes,
         "recipes": recipes,
+        "candidate_recipes": result.get("validated_recipes", {}),
         "category_meta": result.get("category_meta", {}),
         "logs": result.get("logs", []),
     }

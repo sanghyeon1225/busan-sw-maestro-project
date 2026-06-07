@@ -94,6 +94,8 @@ defaults = {
     "sauces": [],
     "tools": [],
     "extra_ingredients": [],
+    "custom_sauces": [],
+    "custom_tools": [],
     "recipes": {},
     "top_recipes": [],
     "recipe_category_meta": {},
@@ -114,6 +116,8 @@ if st.query_params.get("reset") == "1":
         "sauces",
         "tools",
         "extra_ingredients",
+        "custom_sauces",
+        "custom_tools",
         "recipes",
         "top_recipes",
         "recipe_category_meta",
@@ -158,7 +162,7 @@ with col_progress:
             steps_html += f"""
             <div style="display:flex;flex-direction:column;align-items:center;min-width:48px">
                 <div style="width:28px;height:28px;border-radius:50%;{circle_style};
-                    display:flex;align-items:center;justify-content:center;
+                    display:flex;align-items:center;justify-content:justify;
                     font-size:0.85rem;font-weight:700;margin-bottom:4px">{icon}</div>
                 <div style="font-size:0.75rem;{label_style};white-space:nowrap">{label}</div>
             </div>

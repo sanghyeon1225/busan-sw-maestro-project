@@ -1,5 +1,4 @@
 import streamlit as st
-import random
 from html import escape
 from urllib.parse import quote_plus
 
@@ -10,41 +9,7 @@ def render():
     st.title("🍳 레시피 추천")
     st.markdown("<hr style='margin:4px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
-    recipes = st.session_state.get("recipes", {})
-    top_recipes = st.session_state.get("top_recipes", [])
-    category_meta = st.session_state.get("recipe_category_meta", {})
-
-    if not recipes and not top_recipes:
-        st.warning("아직 레시피가 없어요. 재료 보강 단계에서 레시피를 생성해주세요.")
-        return
-
-    st.caption("계량 기준: 종이컵 1컵=180ml · 밥숟가락 1큰술=15ml · 티스푼 1작은술=5ml")
-
-    owned = {i["name"] for i in st.session_state.get("ingredients", [])}
-    owned |= set(st.session_state.get("sauces", []))
-    owned |= set(st.session_state.get("extra_ingredients", []))
-
-    st.markdown("## 이 재료로 만들기 좋은 추천")
-    if top_recipes:
-        _render_recipe_cards(top_recipes, owned, limit=5)
-    else:
-        st.info("추천 레시피가 없어요. 더 많은 재료를 추가해보세요.")
-
-    st.markdown("---")
-
-    st.markdown("## 카테고리별 추천")
-    visible_categories = _get_visible_categories(recipes)
-    if visible_categories:
-        for category in visible_categories:
-            items = recipes.get(category, [])
-            label = category_meta.get(category, {}).get("label", category)
-            st.markdown(f"### {label}")
-            _render_recipe_cards(items, owned, limit=3)
-    else:
-        st.info("표시할 카테고리 추천이 없어요.")
-
-    st.markdown("---")
-    col_back, col_reset = st.columns([1, 1])
+    col_back, col_reset = st.columns([3, 1])
     if col_back.button("← 재료 보강으로"):
         st.session_state.step = 2
         st.rerun()
@@ -54,35 +19,55 @@ def render():
             "sauces",
             "tools",
             "extra_ingredients",
+            "custom_sauces",
+            "custom_tools",
             "recipes",
+            "candidate_recipes",
             "top_recipes",
             "recipe_category_meta",
             "recipe_logs",
             "visible_recipe_categories",
         ]:
-            st.session_state[k] = {} if k in ["recipes", "recipe_category_meta"] else []
+            st.session_state[k] = {} if k in ["recipes", "candidate_recipes", "recipe_category_meta"] else []
         st.session_state.step = 0
         st.rerun()
 
+    top_recipes = st.session_state.get("top_recipes", [])
+    candidate_recipes = st.session_state.get("candidate_recipes", {})
+    category_meta = st.session_state.get("recipe_category_meta", {})
 
-def _get_visible_categories(recipes: dict) -> list[str]:
-    available = [key for key, items in recipes.items() if items]
-    selected = [
-        key
-        for key in st.session_state.get("visible_recipe_categories", [])
-        if key in available
-    ]
-    if selected:
-        return selected
+    if not top_recipes:
+        st.warning("아직 레시피가 없어요. 재료 보강 단계에서 레시피를 생성해주세요.")
+        return
 
-    if not available:
-        st.session_state.visible_recipe_categories = []
-        return []
+    st.caption("계량 기준: 종이컵 1컵=180ml · 밥숟가락 1큰술=15ml · 티스푼 1작은술=5ml")
 
-    count = min(len(available), random.randint(3, 5))
-    selected = random.sample(available, count)
-    st.session_state.visible_recipe_categories = selected
-    return selected
+    owned = {i["name"] for i in st.session_state.get("ingredients", [])}
+    owned |= set(st.session_state.get("sauces", []))
+    owned |= set(st.session_state.get("extra_ingredients", []))
+
+    tab1, tab2 = st.tabs(["⭐ 최종 추천 레시피", "🍽️ 다양한 레시피"])
+
+    with tab1:
+        st.markdown("## 이 재료로 만들기 좋은 추천")
+        if top_recipes:
+            _render_recipe_cards(top_recipes, owned, limit=5)
+        else:
+            st.info("추천 레시피가 없어요. 더 많은 재료를 추가해보세요.")
+
+
+    with tab2:
+        st.markdown("## 다양한 레시피 후보")
+        available_categories = [k for k, v in candidate_recipes.items() if v]
+        if available_categories:
+            for category in available_categories:
+                items = candidate_recipes.get(category, [])
+                label = category_meta.get(category, {}).get("label", category)
+                st.markdown(f"### {label}")
+                _render_recipe_cards(items, owned, limit=len(items))
+        else:
+            st.info("다양한 레시피 정보가 없어요.")
+
 
 
 def _render_recipe_cards(recipe_list: list, owned: set, limit: int = 3):
@@ -111,6 +96,12 @@ def _render_recipe_card(recipe: dict, owned: set):
 
     with st.container(border=True):
         st.markdown(f"### {recipe.get('name', '이름 없는 레시피')}")
+
+        youtube_query = recipe.get("youtube_query")
+        youtube_video = recipe.get("youtube_video") if isinstance(recipe, dict) else None
+        if youtube_query or youtube_video:
+            _render_youtube_area(youtube_query, youtube_video)
+
         st.markdown(
             f"난이도: **{DIFFICULTY_LABEL.get(difficulty, '쉬움')}** &nbsp;|&nbsp; "
             f"시간: {recipe.get('time', '20분')}"
@@ -132,15 +123,13 @@ def _render_recipe_card(recipe: dict, owned: set):
 
         steps = recipe.get("steps", [])
         if steps:
-            with st.expander("조리 순서"):
+            with st.expander("📋 조리 순서"):
                 for idx, step in enumerate(steps, start=1):
-                    st.markdown(f"{idx}. {_strip_step_number(str(step))}")
-
-        youtube_query = recipe.get("youtube_query")
-        youtube_video = recipe.get("youtube_video") if isinstance(recipe, dict) else None
-        if youtube_query or youtube_video:
-            with st.expander("레시피 유튜브 영상"):
-                _render_youtube_area(youtube_query, youtube_video)
+                    step_text = _strip_step_number(str(step))
+                    st.markdown(f"**{idx}단계**")
+                    st.markdown(step_text)
+                    if idx < len(steps):
+                        st.divider()
 
 
 def _render_youtube_area(youtube_query: str | None, youtube_video: dict | None):
@@ -150,13 +139,22 @@ def _render_youtube_area(youtube_query: str | None, youtube_video: dict | None):
 
     if isinstance(youtube_video, dict) and youtube_video.get("thumbnail_url"):
         target_url = youtube_video.get("url") or search_url
-        st.image(youtube_video["thumbnail_url"], use_container_width=True)
+        thumb_url = escape(youtube_video["thumbnail_url"])
+        st.markdown(
+            f"""
+            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:4px;">
+              <img src="{thumb_url}"
+                   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;" />
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         title = youtube_video.get("title")
         if title:
             st.caption(title)
-        _render_link_button(target_url, "유튜브 영상 보기")
+        _render_link_button(target_url, "레시피 유튜브 영상 보러가기")
     elif search_url:
-        _render_link_button(search_url, "유튜브에서 레시피 검색")
+        _render_link_button(search_url, "레시피 유튜브 영상 보러가기")
 
 
 def _render_link_button(url: str, label: str):
