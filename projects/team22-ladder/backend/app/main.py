@@ -47,11 +47,18 @@ async def ingredient_image(
     )
 
     result = graph.invoke(
-        {
-            "image_path": temp.name,
-            "ingredients": []
-        }
-    )
+    {
+        "image_path": temp.name,
+
+        "global_ingredients": [],
+        "window_ingredients": [],
+        "final_ingredients": []
+    }
+)
+
+    return {
+    "ingredients": result["final_ingredients"]
+}
 
     return result
 
