@@ -1,34 +1,6 @@
 import streamlit as st
-import os
-import requests as _requests
 from html import escape
 from urllib.parse import quote_plus
-
-
-@st.cache_data(show_spinner=False)
-def fetch_recipe_image(recipe_name: str) -> str | None:
-    key = os.getenv("UNSPLASH_ACCESS_KEY", "")
-    if not key:
-        return None
-    try:
-        res = _requests.get(
-            "https://api.unsplash.com/search/photos",
-            params={
-                "query": recipe_name + " korean food",
-                "per_page": 3,
-                "orientation": "landscape",
-                "content_filter": "high",
-            },
-            headers={"Authorization": f"Client-ID {key}"},
-            timeout=5,
-        )
-        if res.ok:
-            results = res.json().get("results", [])
-            if results:
-                return results[0]["urls"]["regular"]
-    except Exception:
-        return None
-    return None
 
 DIFFICULTY_LABEL = {1: "매우 쉬움", 2: "쉬움", 3: "보통", 4: "어려움", 5: "매우 어려움"}
 
@@ -123,10 +95,13 @@ def _render_recipe_card(recipe: dict, owned: set):
         missing = [r for r in ingredients if r not in owned]
 
     with st.container(border=True):
-        img_url = fetch_recipe_image(recipe.get("name", ""))
-        if img_url:
-            st.image(img_url, use_container_width=True)
         st.markdown(f"### {recipe.get('name', '이름 없는 레시피')}")
+
+        youtube_query = recipe.get("youtube_query")
+        youtube_video = recipe.get("youtube_video") if isinstance(recipe, dict) else None
+        if youtube_query or youtube_video:
+            _render_youtube_area(youtube_query, youtube_video)
+
         st.markdown(
             f"난이도: **{DIFFICULTY_LABEL.get(difficulty, '쉬움')}** &nbsp;|&nbsp; "
             f"시간: {recipe.get('time', '20분')}"
@@ -156,12 +131,6 @@ def _render_recipe_card(recipe: dict, owned: set):
                     if idx < len(steps):
                         st.divider()
 
-        youtube_query = recipe.get("youtube_query")
-        youtube_video = recipe.get("youtube_video") if isinstance(recipe, dict) else None
-        if youtube_query or youtube_video:
-            with st.expander("레시피 유튜브 영상"):
-                _render_youtube_area(youtube_query, youtube_video)
-
 
 def _render_youtube_area(youtube_query: str | None, youtube_video: dict | None):
     search_url = ""
@@ -174,9 +143,9 @@ def _render_youtube_area(youtube_query: str | None, youtube_video: dict | None):
         title = youtube_video.get("title")
         if title:
             st.caption(title)
-        _render_link_button(target_url, "유튜브 영상 보기")
+        _render_link_button(target_url, "레시피 유튜브 영상 보러가기")
     elif search_url:
-        _render_link_button(search_url, "유튜브에서 레시피 검색")
+        _render_link_button(search_url, "레시피 유튜브 영상 보러가기")
 
 
 def _render_link_button(url: str, label: str):
