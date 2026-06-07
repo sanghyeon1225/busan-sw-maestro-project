@@ -1,5 +1,4 @@
 import streamlit as st
-import random
 import os
 import requests as _requests
 from html import escape
@@ -38,12 +37,11 @@ def render():
     st.title("🍳 레시피 추천")
     st.markdown("<hr style='margin:4px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
-    recipes = st.session_state.get("recipes", {})
     top_recipes = st.session_state.get("top_recipes", [])
     candidate_recipes = st.session_state.get("candidate_recipes", {})
     category_meta = st.session_state.get("recipe_category_meta", {})
 
-    if not recipes and not top_recipes:
+    if not top_recipes:
         st.warning("아직 레시피가 없어요. 재료 보강 단계에서 레시피를 생성해주세요.")
         return
 
@@ -62,18 +60,6 @@ def render():
         else:
             st.info("추천 레시피가 없어요. 더 많은 재료를 추가해보세요.")
 
-        st.markdown("---")
-
-        st.markdown("## 카테고리별 추천")
-        visible_categories = _get_visible_categories(recipes)
-        if visible_categories:
-            for category in visible_categories:
-                items = recipes.get(category, [])
-                label = category_meta.get(category, {}).get("label", category)
-                st.markdown(f"### {label}")
-                _render_recipe_cards(items, owned, limit=3)
-        else:
-            st.info("표시할 카테고리 추천이 없어요.")
 
     with tab2:
         st.markdown("## 다양한 레시피 후보")
@@ -111,25 +97,6 @@ def render():
         st.session_state.step = 0
         st.rerun()
 
-
-def _get_visible_categories(recipes: dict) -> list[str]:
-    available = [key for key, items in recipes.items() if items]
-    selected = [
-        key
-        for key in st.session_state.get("visible_recipe_categories", [])
-        if key in available
-    ]
-    if selected:
-        return selected
-
-    if not available:
-        st.session_state.visible_recipe_categories = []
-        return []
-
-    count = min(len(available), random.randint(3, 5))
-    selected = random.sample(available, count)
-    st.session_state.visible_recipe_categories = selected
-    return selected
 
 
 def _render_recipe_cards(recipe_list: list, owned: set, limit: int = 3):
