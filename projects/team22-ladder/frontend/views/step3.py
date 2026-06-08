@@ -9,9 +9,34 @@ def render():
     st.title("🍳 레시피 추천")
     st.markdown("<hr style='margin:4px 0 20px;border-color:#e5e7eb'>", unsafe_allow_html=True)
 
-    recipes = st.session_state.get("recipes", {})
+    col_back, col_reset = st.columns([3, 1])
+    if col_back.button("← 재료 보강으로"):
+        st.session_state.step = 2
+        st.rerun()
+    if col_reset.button("처음부터 다시"):
+        for k in [
+            "ingredients",
+            "sauces",
+            "tools",
+            "extra_ingredients",
+            "custom_sauces",
+            "custom_tools",
+            "recipes",
+            "candidate_recipes",
+            "top_recipes",
+            "recipe_category_meta",
+            "recipe_logs",
+            "visible_recipe_categories",
+        ]:
+            st.session_state[k] = {} if k in ["recipes", "candidate_recipes", "recipe_category_meta"] else []
+        st.session_state.step = 0
+        st.rerun()
 
-    if not recipes:
+    top_recipes = st.session_state.get("top_recipes", [])
+    candidate_recipes = st.session_state.get("candidate_recipes", {})
+    category_meta = st.session_state.get("recipe_category_meta", {})
+
+    if not top_recipes:
         st.warning("아직 레시피가 없어요. 재료 보강 단계에서 레시피를 생성해주세요.")
         return
 
@@ -21,92 +46,129 @@ def render():
     owned |= set(st.session_state.get("sauces", []))
     owned |= set(st.session_state.get("extra_ingredients", []))
 
-    st.markdown("## 초보 요리사 추천")
-    beginner = recipes.get("beginner", [])
-    if beginner:
-        _render_recipe_cards(beginner, owned)
-    else:
-        st.info("재료가 부족해요. 더 많은 재료를 추가해보세요.")
+    tab1, tab2 = st.tabs(["⭐ 최종 추천 레시피", "🍽️ 다양한 레시피"])
 
-    st.markdown("---")
-
-    st.markdown("## 전자레인지 간편 요리")
-    microwave = recipes.get("microwave", [])
-    if microwave:
-        _render_recipe_cards(microwave, owned)
-    else:
-        st.info("재료가 부족해요. 더 많은 재료를 추가해보세요.")
-
-    st.markdown("---")
-    col_back, col_reset = st.columns([1, 1])
-    if col_back.button("← 재료 보강으로"):
-        st.session_state.step = 2
-        st.rerun()
-    if col_reset.button("처음부터 다시"):
-        for k in ["ingredients", "sauces", "tools", "extra_ingredients", "recipes"]:
-            st.session_state[k] = [] if k != "recipes" else {}
-        st.session_state.step = 0
-        st.rerun()
+    with tab1:
+        st.markdown("## 이 재료로 만들기 좋은 추천")
+        if top_recipes:
+            _render_recipe_cards(top_recipes, owned, limit=5)
+        else:
+            st.info("추천 레시피가 없어요. 더 많은 재료를 추가해보세요.")
 
 
-def _render_recipe_cards(recipe_list: list, owned: set):
-    cols = st.columns(min(len(recipe_list), 3))
-    for i, recipe in enumerate(recipe_list[:3]):
-        with cols[i]:
-            difficulty = recipe.get("difficulty", 1)
-            raw_ingredients = recipe.get("ingredients", [])
-            ingredients, extracted_amounts = _normalize_ingredient_display(raw_ingredients, owned)
-            ingredient_amounts = {
-                **extracted_amounts,
-                **_normalize_amount_display(recipe.get("ingredient_amounts", {}), ingredients, owned),
-            }
-            explicit_missing = recipe.get("missing_ingredients", [])
-            have = [r for r in ingredients if r in owned]
-            missing = _normalize_missing_display(explicit_missing, ingredients, owned)
-            if not missing:
-                missing = [r for r in ingredients if r not in owned]
+    with tab2:
+        st.markdown("## 다양한 레시피 후보")
+        available_categories = [k for k, v in candidate_recipes.items() if v]
+        if available_categories:
+            for category in available_categories:
+                items = candidate_recipes.get(category, [])
+                label = category_meta.get(category, {}).get("label", category)
+                st.markdown(f"### {label}")
+                _render_recipe_cards(items, owned, limit=len(items))
+        else:
+            st.info("다양한 레시피 정보가 없어요.")
 
-            with st.container(border=True):
-                st.markdown(f"### {recipe.get('name', '이름 없는 레시피')}")
-                st.markdown(
-                    f"난이도: **{DIFFICULTY_LABEL.get(difficulty, '쉬움')}** &nbsp;|&nbsp; "
-                    f"시간: {recipe.get('time', '20분')}"
-                )
-                st.markdown(f"_{recipe.get('summary', '')}_")
 
-                st.markdown("**재료**")
-                if have:
-                    st.markdown(" ".join(f"`{_format_ingredient(r, ingredient_amounts)}`" for r in have))
-                if missing:
-                    st.markdown(
-                        " ".join(
-                            f'<span style="background:#dbeafe;padding:2px 6px;border-radius:4px;font-size:0.85em;color:#1d4ed8">{escape(_format_ingredient(r, ingredient_amounts))}</span>'
-                            for r in missing
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                    st.caption(f"없는 재료: {', '.join(missing)}")
 
-                steps = recipe.get("steps", [])
-                if steps:
-                    with st.expander("조리 순서"):
-                        for idx, step in enumerate(steps, start=1):
-                            st.markdown(f"{idx}. {_strip_step_number(str(step))}")
+def _render_recipe_cards(recipe_list: list, owned: set, limit: int = 3):
+    visible = recipe_list[:limit]
+    for start in range(0, len(visible), 3):
+        row = visible[start:start + 3]
+        cols = st.columns(len(row))
+        for i, recipe in enumerate(row):
+            with cols[i]:
+                _render_recipe_card(recipe, owned)
 
-                youtube_query = recipe.get("youtube_query")
-                if youtube_query:
-                    url = f"https://www.youtube.com/results?search_query={quote_plus(youtube_query)}"
-                    st.markdown(
-                        f"""
-                        <a href="{escape(url)}" target="_blank" rel="noopener noreferrer"
-                           style="display:block;text-align:center;text-decoration:none;
-                                  background:#ffffff;color:#262730;border:1px solid rgba(49,51,63,0.2);
-                                  border-radius:0.5rem;padding:0.55rem 0.75rem;font-weight:600">
-                            영상 검색
-                        </a>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+
+def _render_recipe_card(recipe: dict, owned: set):
+    difficulty = recipe.get("difficulty", 1)
+    raw_ingredients = recipe.get("ingredients", [])
+    ingredients, extracted_amounts = _normalize_ingredient_display(raw_ingredients, owned)
+    ingredient_amounts = {
+        **extracted_amounts,
+        **_normalize_amount_display(recipe.get("ingredient_amounts", {}), ingredients, owned),
+    }
+    explicit_missing = recipe.get("missing_ingredients", [])
+    have = [r for r in ingredients if r in owned]
+    missing = _normalize_missing_display(explicit_missing, ingredients, owned)
+    if not missing:
+        missing = [r for r in ingredients if r not in owned]
+
+    with st.container(border=True):
+        st.markdown(f"### {recipe.get('name', '이름 없는 레시피')}")
+
+        youtube_query = recipe.get("youtube_query")
+        youtube_video = recipe.get("youtube_video") if isinstance(recipe, dict) else None
+        if youtube_query or youtube_video:
+            _render_youtube_area(youtube_query, youtube_video)
+
+        st.markdown(
+            f"난이도: **{DIFFICULTY_LABEL.get(difficulty, '쉬움')}** &nbsp;|&nbsp; "
+            f"시간: {recipe.get('time', '20분')}"
+        )
+        st.markdown(f"_{recipe.get('summary', '')}_")
+
+        st.markdown("**재료**")
+        if have:
+            st.markdown(" ".join(f"`{_format_ingredient(r, ingredient_amounts)}`" for r in have))
+        if missing:
+            st.markdown("**없는 재료**")
+            st.markdown(
+                " ".join(
+                    f'<span style="background:#dbeafe;padding:2px 6px;border-radius:4px;font-size:0.85em;color:#1d4ed8">{escape(_format_ingredient(r, ingredient_amounts))}</span>'
+                    for r in missing
+                ),
+                unsafe_allow_html=True,
+            )
+
+        steps = recipe.get("steps", [])
+        if steps:
+            with st.expander("📋 조리 순서"):
+                for idx, step in enumerate(steps, start=1):
+                    step_text = _strip_step_number(str(step))
+                    st.markdown(f"**{idx}단계**")
+                    st.markdown(step_text)
+                    if idx < len(steps):
+                        st.divider()
+
+
+def _render_youtube_area(youtube_query: str | None, youtube_video: dict | None):
+    search_url = ""
+    if youtube_query:
+        search_url = f"https://www.youtube.com/results?search_query={quote_plus(youtube_query)}"
+
+    if isinstance(youtube_video, dict) and youtube_video.get("thumbnail_url"):
+        target_url = youtube_video.get("url") or search_url
+        thumb_url = escape(youtube_video["thumbnail_url"])
+        st.markdown(
+            f"""
+            <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:4px;">
+              <img src="{thumb_url}"
+                   style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;" />
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        title = youtube_video.get("title")
+        if title:
+            st.caption(title)
+        _render_link_button(target_url, "레시피 유튜브 영상 보러가기")
+    elif search_url:
+        _render_link_button(search_url, "레시피 유튜브 영상 보러가기")
+
+
+def _render_link_button(url: str, label: str):
+    st.markdown(
+        f"""
+        <a href="{escape(url)}" target="_blank" rel="noopener noreferrer"
+           style="display:block;text-align:center;text-decoration:none;
+                  background:#ffffff;color:#262730;border:1px solid rgba(49,51,63,0.2);
+                  border-radius:0.5rem;padding:0.55rem 0.75rem;font-weight:600">
+            {escape(label)}
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _format_ingredient(name: str, ingredient_amounts: dict) -> str:
